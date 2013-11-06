@@ -13,6 +13,12 @@ from jsonfield import JSONField
 
 from autoslug.fields import AutoSlugField
 
+try:
+    import gdal
+    LOCATION_CALC_ENABLED = True
+except:
+    LOCATION_CALC_ENABLED = False
+
 
 __ALL__ = ["Tweet", "TwitterUser", "StreamAccount", "Stream", "TrackedTerm", "FollowedUser", "FollowedLocation"]
 
@@ -134,7 +140,7 @@ class Stream(models.Model):
         contains_required_terms = any([tweet.text.lower().find(term.phrase.lower()) != -1 for term in tracked_terms]) if tracked_terms.count() > 0 else True
         is_from_required_users = any([tweet.user.id == user.user_id for user in followed_users]) if followed_users.count() > 0 else True
 
-        if followed_locations.count() > 0:
+        if followed_locations.count() > 0 and LOCATION_CALC_ENABLED:
             is_from_required_locations = False
             for location in followed_locations:
                 bounding_box = location.bbox()
