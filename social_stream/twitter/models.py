@@ -275,7 +275,7 @@ class TweetManager(models.Manager):
         return self.create(**data)
 
 
-class Tweet(JSONModel):
+class AbstractTweet(JSONModel):
     """
     Model representing a tweet on Twitter
     """
@@ -302,6 +302,11 @@ class Tweet(JSONModel):
 
     objects = TweetManager()
 
+    class Meta:
+        verbose_name = 'tweet'
+        verbose_name_plural = 'tweets'
+        abstract = True
+
     def __unicode__(self):
         return u"%s" % self.text
 
@@ -313,6 +318,12 @@ class Tweet(JSONModel):
         if self.stream.matches_criteria(self):
             return super(Tweet, self).save(*args, **kwargs)
         return None
+
+
+class Tweet(AbstractTweet):
+
+    class Meta(AbstractTweet.Meta):
+        swappable = 'SOCIAL_STREAM_TWEET_MODEL'
 
 
 @receiver(post_save, sender=Tweet)

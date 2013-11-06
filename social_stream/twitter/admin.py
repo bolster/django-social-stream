@@ -174,6 +174,7 @@ admin.site.register(TwitterUser, TwitterUserAdmin)
 
 class TweetAdmin(admin.ModelAdmin):
     list_display = ('id', 'text', 'user', 'stream')
+    raw_id_fields = ('user', 'stream')
 
     def has_add_permission(self, request):
         return False

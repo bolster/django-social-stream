@@ -10,6 +10,8 @@ from twython import TwythonStreamer
 
 from social_stream.twitter.models import *
 
+from . import get_tweet_model
+
 
 class Streamer(TwythonStreamer):
 
@@ -19,9 +21,10 @@ class Streamer(TwythonStreamer):
         super(Streamer, self).__init__(*args, **kwargs)
 
     def on_success(self, data):
+        TweetModel = get_tweet_model()
         if 'text' in data:
             try:
-                Tweet.objects.create_tweet_for_stream(self.stream, data)
+                TweetModel.objects.create_tweet_for_stream(self.stream, data)
             except Exception, e:
                 print e
 

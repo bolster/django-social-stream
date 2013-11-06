@@ -1,7 +1,7 @@
 from tastypie import fields
 from tastypie.resources import ModelResource
 
-from .models import *
+from . import get_tweet_model
 
 
 class TweetResource(ModelResource):
@@ -11,5 +11,5 @@ class TweetResource(ModelResource):
     coordinates = fields.DictField('coordinates')
 
     class Meta:
-        queryset = Tweet.objects.order_by('-created_at')
+        queryset = get_tweet_model().objects.order_by('-created_at')
         excludes = ('raw_data', )
