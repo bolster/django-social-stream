@@ -20,7 +20,10 @@ class Streamer(TwythonStreamer):
 
     def on_success(self, data):
         if 'text' in data:
-            Tweet.objects.create_tweet_for_stream(self.stream, data)
+            try:
+                Tweet.objects.create_tweet_for_stream(self.stream, data)
+            except Exception, e:
+                print e
 
     def on_error(self, status_code, data):
         # print status_code
@@ -75,13 +78,14 @@ class Command(BaseCommand):
         if self.stream_thread:
             return
 
-        self.stdout.write("\nStarting stream.\n\n")
+        self.stdout.write("\nStarting stream.\nTracked Terms: %s\n\n" % self.stream.tracked_terms.all())
 
         self.stream_thread = StreamerThread(self.key, self.secret, self.token, self.token_secret, self.stream)
         self.stream_thread.start()
 
         self.stream._run = False
         self.stream._pause = False
+        self.stream._restart = False
         self.stream.running = True
         self.stream.save()
 
@@ -97,6 +101,7 @@ class Command(BaseCommand):
 
         self.stream._run = False
         self.stream._pause = False
+        self.stream._restart = False
         self.stream.running = False
         self.stream.save()
 
@@ -131,7 +136,6 @@ class Command(BaseCommand):
         try:
 
             while True:
-                self.stdout.write("Checking stream status...")
                 self.stream = Stream.objects.get(pk=self.stream.pk)
                 if self.stream._run and not self.stream.running:
                     # start stream thread
@@ -139,6 +143,9 @@ class Command(BaseCommand):
                 elif self.stream._pause and self.stream.running:
                     # stop stream thread
                     self.stop_stream_thread()
+                elif self.stream._restart and self.stream.running:
+                    self.stop_stream_thread()
+                    self.start_stream_thread()
 
                 time.sleep(5)
         except KeyboardInterrupt:

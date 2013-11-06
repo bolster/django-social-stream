@@ -1,12 +1,23 @@
 import datetime
+import json
 
+from celery_pipelines import *
+
+from django.conf import settings
 from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.contrib.gis.geos import GEOSGeometry, Point, Polygon
+
 from jsonfield import JSONField
 
 from autoslug.fields import AutoSlugField
 
 
 __ALL__ = ["Tweet", "TwitterUser", "StreamAccount", "Stream", "TrackedTerm", "FollowedUser", "FollowedLocation"]
+
+
+TWEET_PIPELINES = getattr(settings, "SOCIAL_STREAM_TWITTER_PIPELINES", [])
 
 
 def parse_twitter_date(date_str):
@@ -24,7 +35,7 @@ def parse_tweet_obj(tweet_obj):
         'entities': tweet_obj['entities'] or {},
         'retweet_count': int(tweet_obj['retweet_count']),
         'favorite_count': int(tweet_obj['favorite_count']),
-        'text': tweet_obj['text'].encode('utf-8'),
+        'text': tweet_obj['text'],
         'created_at': parse_twitter_date(tweet_obj['created_at']),
         'raw_data': tweet_obj
     }
@@ -87,6 +98,7 @@ class Stream(models.Model):
     running = models.BooleanField(default=False, verbose_name="Running?", editable=False)
     _run = models.BooleanField(default=False, editable=False)
     _pause = models.BooleanField(default=False, editable=False)
+    _restart = models.BooleanField(default=False, editable=False)
 
     def __unicode__(self):
         return u'{0} ({1})'.format(self.name, self.slug)
@@ -107,10 +119,48 @@ class Stream(models.Model):
 
         return kwargs
 
+    def matches_criteria(self, tweet):
+        """
+        Twitter does an OR when you pass it params in the stream API.
+        Thus any tweet matching a term OR a user OR a location will come through.
+
+        This method makes sure that the given tweet matches any required criteria (specified by the required flag).
+        """
+        tracked_terms = self.tracked_terms.filter(required=True)
+        followed_users = self.followed_users.filter(user_id__isnull=False, required=True).exclude(user_id="")
+        followed_locations = self.followed_locations.filter(required=True)
+
+        # check for tracked terms
+        contains_required_terms = any([tweet.text.lower().find(term.phrase.lower()) != -1 for term in tracked_terms]) if tracked_terms.count() > 0 else True
+        is_from_required_users = any([tweet.user.id == user.user_id for user in followed_users]) if followed_users.count() > 0 else True
+
+        if followed_locations.count() > 0:
+            is_from_required_locations = False
+            for location in followed_locations:
+                bounding_box = location.bbox()
+                if (tweet.coordinates is not None and tweet.coordinates != {}):
+                    pnt = GEOSGeometry(json.dumps(tweet.coordinates))
+                    if pnt.within(bounding_box):
+                        is_from_required_locations = True
+                elif (tweet.place is not None and tweet.place != {}):
+                    bbox = tweet.place['bounding_box']
+                    for i, coordinate_chain in enumerate(bbox['coordinates']):
+                        coordinate_chain.append(coordinate_chain[0])
+                        bbox['coordinates'][i] = coordinate_chain
+                    polygon = GEOSGeometry(json.dumps(bbox))
+                    if polygon.intersects(bounding_box):
+                        is_from_required_locations = True
+        else:
+            is_from_required_locations = True
+
+        return contains_required_terms and is_from_required_users and is_from_required_locations
+
 
 class TrackedTerm(models.Model):
     stream = models.ForeignKey(Stream, related_name="tracked_terms")
     phrase = models.CharField(max_length=60)
+
+    required = models.BooleanField(default=False)
 
     def __unicode__(self):
         return u'{}'.format(self.phrase)
@@ -120,6 +170,8 @@ class FollowedUser(models.Model):
     stream = models.ForeignKey(Stream, related_name='followed_users')
     username = models.CharField(max_length=500)
     user_id = models.CharField(max_length=500, editable=False, null=True)
+
+    required = models.BooleanField(default=False)
 
     def __unicode__(self):
         return u'@{}'.format(self.username)
@@ -136,8 +188,13 @@ class FollowedLocation(models.Model):
     stream = models.ForeignKey(Stream, related_name='followed_locations')
     bounding_box = models.CharField(max_length=1000)
 
+    required = models.BooleanField(default=False)
+
     def __unicode__(self):
         return u'{}'.format(self.bounding_box)
+
+    def bbox(self):
+        return Polygon.from_bbox(self.bounding_box.split(","))
 
 
 class JSONModel(models.Model):
@@ -240,11 +297,25 @@ class Tweet(JSONModel):
     objects = TweetManager()
 
     def __unicode__(self):
-        return u"{}".format(self.text)
+        return u"%s" % self.text
 
     def save(self, *args, **kwargs):
         # create user
         user = TwitterUser.objects.create_user(self.raw_data['user'])  # create a new twitter user from the raw user data
         self.user = user
 
-        return super(Tweet, self).save(*args, **kwargs)
+        if self.stream.matches_criteria(self):
+            return super(Tweet, self).save(*args, **kwargs)
+        return None
+
+
+@receiver(post_save, sender=Tweet)
+def post_tweet_save(sender, instance, created, *args, **kwargs):
+    if not created:
+        return
+
+    for pipeline in TWEET_PIPELINES:
+        if callable(pipeline):
+            result = pipeline().start(wait_for_result=False, instance=instance)
+        else:
+            result = PIPELINES.start(pipeline, wait_for_result=False, instance=instance)

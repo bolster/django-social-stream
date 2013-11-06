@@ -107,7 +107,7 @@ class FollowedLocationInline(admin.TabularInline):
 
 class StreamAdmin(admin.ModelAdmin):
     list_display = ('name', 'slug', 'tracked_count', 'follow_count', 'location_count', 'tweet_count', 'running', '_run', '_pause')
-    actions = ['start_stream', 'pause_stream']
+    actions = ['start_stream', 'pause_stream', 'restart_stream']
     inlines = [
         TrackedTermInline,
         FollowedUserInline,
@@ -137,6 +137,10 @@ class StreamAdmin(admin.ModelAdmin):
     def pause_stream(self, request, queryset):
         queryset.filter(running=True).update(_run=False, _pause=True)
     pause_stream.short_description = "Pause streams"
+
+    def restart_stream(self, request, queryset):
+        queryset.filter(running=True).update(_run=False, _restart=True, _pause=False)
+    restart_stream.short_description = "Restart streams"
 
 
 admin.site.register(Stream, StreamAdmin)
