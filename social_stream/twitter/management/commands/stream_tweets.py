@@ -10,7 +10,7 @@ from twython import TwythonStreamer
 
 from social_stream.twitter.models import *
 
-from . import get_tweet_model
+from social_stream.twitter import get_tweet_model
 
 
 class Streamer(TwythonStreamer):
@@ -26,7 +26,9 @@ class Streamer(TwythonStreamer):
             try:
                 TweetModel.objects.create_tweet_for_stream(self.stream, data)
             except Exception, e:
-                print e
+                import traceback
+                traceback.print_exc(file=sys.stdout)
+                # print e
 
     def on_error(self, status_code, data):
         # print status_code

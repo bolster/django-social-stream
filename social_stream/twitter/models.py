@@ -7,16 +7,21 @@ from django.conf import settings
 from django.db import models
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from django.contrib.gis.geos import GEOSGeometry, Point, Polygon
+from django.contrib.gis.gdal import OGRGeometry
+from django.contrib.gis.gdal.srs import SpatialReference
+from django.utils.timezone import utc
 
 from jsonfield import JSONField
+
+from social_stream.twitter import get_tweet_model
 
 from autoslug.fields import AutoSlugField
 
 try:
-    import gdal
+    from osgeo import gdal
     LOCATION_CALC_ENABLED = True
 except:
+    print "GDAL not enabled"
     LOCATION_CALC_ENABLED = False
 
 
@@ -27,7 +32,9 @@ TWEET_PIPELINES = getattr(settings, "SOCIAL_STREAM_TWITTER_PIPELINES", [])
 
 
 def parse_twitter_date(date_str):
-    return datetime.datetime.strptime(date_str, '%a %b %d %H:%M:%S +0000 %Y')
+    dt = datetime.datetime.strptime(date_str, '%a %b %d %H:%M:%S +0000 %Y')
+    dt = dt.replace(tzinfo=utc)
+    return dt
 
 
 def parse_tweet_obj(tweet_obj):
@@ -144,18 +151,9 @@ class Stream(models.Model):
             is_from_required_locations = False
             for location in followed_locations:
                 bounding_box = location.bbox()
-                if (tweet.coordinates is not None and tweet.coordinates != {}):
-                    pnt = GEOSGeometry(json.dumps(tweet.coordinates))
-                    if pnt.within(bounding_box):
-                        is_from_required_locations = True
-                elif (tweet.place is not None and tweet.place != {}):
-                    bbox = tweet.place['bounding_box']
-                    for i, coordinate_chain in enumerate(bbox['coordinates']):
-                        coordinate_chain.append(coordinate_chain[0])
-                        bbox['coordinates'][i] = coordinate_chain
-                    polygon = GEOSGeometry(json.dumps(bbox))
-                    if polygon.intersects(bounding_box):
-                        is_from_required_locations = True
+                pnt = tweet.get_coordinates()
+                if pnt:
+                    is_from_required_locations = pnt.within(bounding_box)
         else:
             is_from_required_locations = True
 
@@ -200,7 +198,7 @@ class FollowedLocation(models.Model):
         return u'{}'.format(self.bounding_box)
 
     def bbox(self):
-        return Polygon.from_bbox(self.bounding_box.split(","))
+        return OGRGeometry(OGRGeometry.from_bbox(self.bounding_box.split(",")).json, srs=SpatialReference("WGS84"))
 
 
 class JSONModel(models.Model):
@@ -315,8 +313,26 @@ class AbstractTweet(JSONModel):
         user = TwitterUser.objects.create_user(self.raw_data['user'])  # create a new twitter user from the raw user data
         self.user = user
 
-        if self.stream.matches_criteria(self):
-            return super(Tweet, self).save(*args, **kwargs)
+        return super(AbstractTweet, self).save(*args, **kwargs)
+
+    def get_coordinates(self):
+        if self.coordinates and self.coordinates != {} and 'coordinates' in self.coordinates:
+            pnt = OGRGeometry(json.dumps(self.coordinates), srs=SpatialReference("WGS84"))
+            return pnt
+        elif self.place and self.place != {} and "bounding_box" in self.place:
+            bbox = self.place['bounding_box']
+            for i, coordinate_chain in enumerate(bbox['coordinates']):
+                coordinate_chain.append(coordinate_chain[0])
+                bbox['coordinates'][i] = coordinate_chain
+            polygon = OGRGeometry(json.dumps(bbox), srs=SpatialReference("WGS84"))
+            return polygon.centroid
+        else:
+            return None
+
+    def get_coordinates_tuple(self):
+        coords = self.get_coordinates()
+        if coords:
+            return coords.tuple
         return None
 
 
@@ -326,9 +342,13 @@ class Tweet(AbstractTweet):
         swappable = 'SOCIAL_STREAM_TWEET_MODEL'
 
 
-@receiver(post_save, sender=Tweet)
+@receiver(post_save, sender=get_tweet_model())
 def post_tweet_save(sender, instance, created, *args, **kwargs):
     if not created:
+        return
+
+    if not instance.stream.matches_criteria(instance):
+        instance.delete()
         return
 
     for pipeline in TWEET_PIPELINES:

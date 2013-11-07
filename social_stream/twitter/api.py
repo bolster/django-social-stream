@@ -1,7 +1,7 @@
 from tastypie import fields
 from tastypie.resources import ModelResource
 
-from . import get_tweet_model
+from social_stream.twitter import get_tweet_model
 
 
 class TweetResource(ModelResource):
