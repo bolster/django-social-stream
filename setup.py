@@ -4,18 +4,12 @@ import os
 import sys
 
 try:
-    from setuptools import setup
+    from setuptools import setup, find_packages
 except ImportError:
-    from distutils.core import setup
+    from distutils.core import setup, find_packages
 
 __author__ = 'Adam Miskiewicz <adam@bolsterlabs.com>'
 __version__ = '0.1.0'
-
-packages = [
-    'social_stream',
-    'social_stream.facebook',
-    'social_stream.twitter',
-]
 
 if sys.argv[-1] == 'publish':
     os.system('python setup.py sdist upload')
@@ -38,7 +32,8 @@ setup(
     description='Djangoified Social Streamer (Twitter & Facebook)',
     long_description=open('README.rst').read() + '\n\n' + open('HISTORY.rst').read(),
     include_package_data=True,
-    packages=packages,
+    zip_safe=False,
+    packages=find_packages(exclude=['tests', 'tests.*']),
     classifiers=[
         'Development Status :: 3 - Alpha',
         'Intended Audience :: Developers',
