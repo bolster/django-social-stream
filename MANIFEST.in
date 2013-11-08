@@ -1,1 +1,3 @@
 include README.rst HISTORY.rst LICENSE requirements.txt
+
+recursive-include social_stream/twitter/templates *
