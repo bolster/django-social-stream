@@ -3,6 +3,8 @@ import json
 
 from celery_pipelines import *
 
+from twython import Twython
+
 from django.conf import settings
 from django.db import models
 from django.db.models.signals import post_save
@@ -132,6 +134,16 @@ class Stream(models.Model):
 
         return kwargs
 
+    def build_search_query(self):
+        tracked_terms = self.tracked_terms.all()
+        followed_users = self.followed_users.filter(user_id__isnull=False).exclude(user_id="")
+
+        query = ""
+        query += " OR ".join([term.phrase for term in tracked_terms])
+        query += " OR "
+        query += " OR ".join(["@" + u.username for u in followed_users])
+        return query
+
     def matches_criteria(self, tweet):
         """
         Twitter does an OR when you pass it params in the stream API.
@@ -182,8 +194,13 @@ class FollowedUser(models.Model):
 
     def save(self, *args, **kwargs):
         self.username = self.username.strip("@")
-
-        # go out and get the user_id
+        account = StreamAccount.objects.get_default_account()
+        key = getattr(settings, "TWITTER_ACCESS_TOKEN")
+        secret = getattr(settings, "TWITTER_ACCESS_TOKEN_SECRET")
+        token, token_secret = account.auth_data()
+        twitter = Twython(key, secret, token, token_secret)
+        user = twitter.lookup_user(screen_name=self.username)
+        self.user_id = user[0]['id_str']
 
         return super(FollowedUser, self).save(*args, **kwargs)
 
@@ -347,9 +364,9 @@ def post_tweet_save(sender, instance, created, *args, **kwargs):
     if not created:
         return
 
-    if not instance.stream.matches_criteria(instance):
-        instance.delete()
-        return
+    # if not instance.stream.matches_criteria(instance):
+    #     instance.delete()
+    #     return
 
     for pipeline in TWEET_PIPELINES:
         if callable(pipeline):
