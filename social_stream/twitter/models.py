@@ -18,7 +18,7 @@ from social_stream.twitter import get_tweet_model
 from autoslug.fields import AutoSlugField
 
 try:
-    from osgeo import gdal
+    from django.contrib.gis.gdal.geometries import OGRGeometry
     LOCATION_CALC_ENABLED = True
 except:
     print "GDAL not enabled"
