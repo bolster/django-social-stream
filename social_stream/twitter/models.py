@@ -139,7 +139,7 @@ class Stream(models.Model):
         followed_users = self.followed_users.filter(user_id__isnull=False).exclude(user_id="")
 
         query = ""
-        query += " OR ".join([term.phrase for term in tracked_terms])
+        query += " OR ".join([term.get_phrase() for term in tracked_terms])
         query += " OR "
         query += " OR ".join(["@" + u.username for u in followed_users])
         return query
@@ -180,6 +180,12 @@ class TrackedTerm(models.Model):
 
     def __unicode__(self):
         return u'{}'.format(self.phrase)
+
+    def get_phrase(self):
+        split = self.phrase.split(' ')
+        if len(split) > 1:
+            return '"%s"' % self.phrase
+        return self.phrase
 
 
 class FollowedUser(models.Model):
